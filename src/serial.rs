@@ -249,6 +249,92 @@ impl<USART: Instance, WORD> Serial<USART, WORD> {
     ) -> Result<Self, config::InvalidConfig> {
         Self::_new(uart, (Some(pins.0), Some(pins.1)), config, rcc)
     }
+
+    /// Create a Serial without enabling the peripheral clock.
+    ///
+    /// # Safety
+    ///
+    /// The caller must have already enabled the USART peripheral clock via the
+    /// RCC APB1ENR/APB2ENR register from a privileged context (e.g. before
+    /// handing the USART to a partition). This avoids bit-band alias accesses
+    /// that would fault under MPU enforcement if the bit-band region is not in
+    /// the partition's peripheral_regions grant.
+    pub unsafe fn new_unchecked(
+        uart: USART,
+        pins: (
+            impl Into<USART::Tx<PushPull>>,
+            impl Into<USART::Rx<PushPull>>,
+        ),
+        config: impl Into<config::Config>,
+        clocks: &rcc::Clocks,
+    ) -> Result<Self, config::InvalidConfig> {
+        Self::_new_unchecked(uart, (Some(pins.0), Some(pins.1)), config, clocks)
+    }
+
+    unsafe fn _new_unchecked(
+        uart: USART,
+        pins: (
+            Option<impl Into<USART::Tx<PushPull>>>,
+            Option<impl Into<USART::Rx<PushPull>>>,
+        ),
+        config: impl Into<config::Config>,
+        clocks: &rcc::Clocks,
+    ) -> Result<Self, config::InvalidConfig> {
+        use self::config::*;
+
+        let config = config.into();
+        // Clock enable and reset are intentionally skipped.
+        // Enable::enable() / Reset::reset() use cortex_m::bb (bit-band alias
+        // region 0x42000000+) which may not be mapped in the partition's MPU
+        // grant. The caller must enable the clock via a direct MMIO write from
+        // privileged context before boot() arms the MPU.
+
+        let pclk_freq = USART::clock(clocks).raw();
+        let baud = config.baudrate.0;
+
+        if !USART::RB::IRDA && config.irda != IrdaMode::None {
+            return Err(config::InvalidConfig);
+        }
+
+        let (over8, div) = if config.irda != IrdaMode::None {
+            let div = (pclk_freq + (baud / 2)) / baud;
+            (false, div)
+        } else {
+            calculate_brr(pclk_freq, baud)?
+        };
+
+        uart.brr().write(|w| unsafe { w.bits(div as u16) });
+
+        // Reset other registers to disable advanced USART features
+        uart.cr2().reset();
+        uart.cr3().reset();
+
+        if config.irda != IrdaMode::None && config.stopbits != StopBits::STOP1 {
+            return Err(config::InvalidConfig);
+        }
+
+        uart.configure_irda(config.irda, pclk_freq);
+
+        uart.cr1().write(|w| {
+            w.ue().set_bit();
+            w.over8().bit(over8);
+            w.te().set_bit();
+            w.re().set_bit();
+            w.m().bit(config.wordlength == WordLength::DataBits9);
+            w.pce().bit(config.parity != Parity::ParityNone);
+            w.ps().bit(config.parity == Parity::ParityOdd)
+        });
+
+        uart.enable_dma(config.dma);
+
+        let serial = Serial {
+            tx: Tx::new(uart, pins.0.map(Into::into)),
+            rx: Rx::new(unsafe { USART::steal() }, pins.1.map(Into::into)),
+        };
+        serial.tx.usart.set_stopbits(config.stopbits);
+        Ok(serial)
+    }
+
     fn _new(
         uart: USART,
         pins: (
