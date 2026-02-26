@@ -83,6 +83,17 @@ pub trait GpioExt {
 
     /// Splits the GPIO block into independent pins and registers
     fn split(self, rcc: &mut RCC) -> Self::Parts;
+
+    /// Splits the GPIO block into independent pins without touching RCC.
+    ///
+    /// # Safety
+    ///
+    /// The caller must have already enabled the GPIO peripheral clock via the
+    /// RCC AHB1ENR register from a privileged context (e.g. before handing the
+    /// GPIO to a partition). This avoids bit-band alias accesses that would fault
+    /// under MPU enforcement if the bit-band region is not in the partition's
+    /// peripheral_regions grant.
+    unsafe fn split_unchecked(self) -> Self::Parts;
 }
 
 /// Id, port and mode for any pin
@@ -576,6 +587,14 @@ macro_rules! gpio {
                     // Enable clock.
                     $GPIOX::enable(rcc);
                     $GPIOX::reset(rcc);
+                    Parts {
+                        $(
+                            $pxi: $PXi::new(),
+                        )+
+                    }
+                }
+
+                unsafe fn split_unchecked(self) -> Parts {
                     Parts {
                         $(
                             $pxi: $PXi::new(),
