@@ -166,6 +166,8 @@ impl<I2C: Instance> I2c<I2C> {
         let mode = mode.into();
         // Make sure the I2C unit is disabled so we can configure it
         self.i2c.cr1().modify(|_, w| w.pe().clear_bit());
+        // OAR1 bit 14 is reserved and must remain set on STM32F4.
+        self.i2c.oar1().write(|w| unsafe { w.bits(1 << 14) });
 
         // Calculate settings for I2C speed modes
         let clock = pclk.raw();
