@@ -37,6 +37,15 @@ impl<const P: char, const N: u8, const A: u8> Pin<P, N, Alternate<A, PushPull>> 
 }
 
 impl<const P: char, const N: u8, MODE: PinMode> Pin<P, N, MODE> {
+    /// Re-type a pin without touching its GPIO registers.
+    ///
+    /// The caller must have configured the physical pin already. This is for
+    /// MPU-partitioned images where the partition owns the peripheral window
+    /// but not the GPIO bank.
+    pub unsafe fn into_mode_unchecked<M: PinMode>(self) -> Pin<P, N, M> {
+        Pin::new()
+    }
+
     /// Configures the pin to operate alternate mode
     pub fn into_alternate<const A: u8>(self) -> Pin<P, N, Alternate<A, PushPull>>
     where

@@ -84,7 +84,9 @@ pub use stm32f4::stm32f469 as pac;
 pub use stm32f4::stm32f469 as pac;
 use stm32f4::Periph;
 
-// Enable use of interrupt macro
+// Enable use of the PAC interrupt macro only when the PAC's vector table is
+// explicitly requested. Partitioned images deliberately leave it disabled.
+#[cfg(feature = "rt")]
 pub use crate::pac::interrupt;
 
 pub mod adc;

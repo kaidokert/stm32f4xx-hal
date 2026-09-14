@@ -137,6 +137,25 @@ impl<I2C: Instance> I2c<I2C> {
         i2c
     }
 
+    /// Create an I2C peripheral without enabling or resetting its RCC clock.
+    ///
+    /// This is intended for MPU-partitioned firmware: privileged startup must
+    /// enable and reset the peripheral first, while the partition may only be
+    /// granted the I2C register window. The caller must ensure that the clock
+    /// and pin mux are already configured and that `pclk1` is the actual APB1
+    /// frequency.
+    pub unsafe fn new_unchecked(
+        i2c: I2C,
+        pins: (impl Into<I2C::Scl>, impl Into<I2C::Sda>),
+        mode: impl Into<Mode>,
+        pclk1: Hertz,
+    ) -> Self {
+        let pins = (pins.0.into(), pins.1.into());
+        let i2c = I2c { i2c, pins };
+        i2c.i2c_init(mode, pclk1);
+        i2c
+    }
+
     pub fn release(self) -> (I2C, (I2C::Scl, I2C::Sda)) {
         (self.i2c, self.pins)
     }
@@ -147,6 +166,8 @@ impl<I2C: Instance> I2c<I2C> {
         let mode = mode.into();
         // Make sure the I2C unit is disabled so we can configure it
         self.i2c.cr1().modify(|_, w| w.pe().clear_bit());
+        // OAR1 bit 14 is reserved and must remain set on STM32F4.
+        self.i2c.oar1().write(|w| unsafe { w.bits(1 << 14) });
 
         // Calculate settings for I2C speed modes
         let clock = pclk.raw();
